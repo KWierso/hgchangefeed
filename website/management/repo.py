@@ -16,6 +16,47 @@ from website.models import *
 from website.management.http import http_fetch
 from website.management.patch import Patch
 
+forbidden = [
+                'bfa194d93aed',
+                '4c222a1d9a00',
+                'd404a7e19abc',
+                '07bfe0d6bb17',
+                'ffda91005137',
+                'b6dc6f3d784f',
+                '4e58ec8d7b65',
+                'f65624520aca',
+                '765bd61060fb',
+                '44719b2c68c0',
+                '0270b068f43d',
+                '35f1bed4b22d',
+                'cfa0e7223a07',
+                '1df317b22620',
+                'ce12b980abcf',
+                '007661b5f696',
+                'cd2d73565c14',
+                'a1e876f639a5',
+                '8874ed9a41f6',
+                '9d6f074c3985',
+                '1ff363f89f34',
+                '756cecc66900',
+                '3d9199e4ffe5',
+                'ebd16c799115',
+                'e7e138dded91',
+                '55dd9a449ba3',
+                '95ad4154af19',
+                '58d56f83d220',
+                '2a319d071aae',
+                '7b6f6f77dcab',
+                '0099075ce1df',
+                '92aba24f2c78',
+                'd2aefe6f790e',
+                '7c57971614aa',
+                '4c6706b61a74',
+                '3a0d7421f476',
+                '664a9f06b1fb',
+                '8991b10184de'
+            ]
+
 def utc_datetime(timestamp):
     return datetime.fromtimestamp(timestamp, utc)
 
@@ -96,66 +137,67 @@ def add_pushes(ui, repository, pushes):
 
     try:
         for pushdata in pushes:
-            push = Push(push_id = pushdata['id'], repository = repository, user = pushdata['user'], date = pushdata['date'])
-            push.save()
+            if not pushdata['id'] in forbidden:
+                push = Push(push_id = pushdata['id'], repository = repository, user = pushdata['user'], date = pushdata['date'])
+                push.save()
 
-            changes = []
-            index = 0
-            for cset in pushdata['changesets']:
-                try:
-                    try:
-                        changeset = Changeset.objects.get(hex = cset)
-                    except Changeset.DoesNotExist:
-                        url = "%sraw-rev/%s" % (repository.url, cset)
-                        patches = [Patch(http_fetch(url).split("\n"))]
+	        changes = []
+	        index = 0
+	        for cset in pushdata['changesets']:
+	            try:
+	                try:
+	                    changeset = Changeset.objects.get(hex = cset)
+	                except Changeset.DoesNotExist:
+	                    url = "%sraw-rev/%s" % (repository.url, cset)
+	                    patches = [Patch(http_fetch(url).split("\n"))]
 
-                        for parent in patches[0].parents[1:]:
-                            url = "%sraw-rev/%s:%s" % (repository.url, parent, cset)
-                            patches.append(Patch(http_fetch(url).split("\n")))
+	                    for parent in patches[0].parents[1:]:
+	                        url = "%sraw-rev/%s:%s" % (repository.url, parent, cset)
+	                        patches.append(Patch(http_fetch(url).split("\n")))
 
-                        allfiles = set()
+	                    allfiles = set()
 
-                        for patch in patches:
-                            if patch.hex != cset:
-                                raise Exception("Saw unexpected changeset %s, expecting %s" % (patch.hex, cset))
-                            allfiles.update(patch.files.keys())
+	                    for patch in patches:
+	                        if patch.hex != cset:
+	                            raise Exception("Saw unexpected changeset %s, expecting %s" % (patch.hex, cset))
+	                        allfiles.update(patch.files.keys())
 
-                        changeset = Changeset(hex = patches[0].hex,
-                                              author = patches[0].user,
-                                              date = patches[0].date,
-                                              tzoffset = patches[0].tzoffset,
-                                              description = patches[0].description)
-                        changeset.save()
-                        added = added + 1
+	                    changeset = Changeset(hex = patches[0].hex,
+	                                          author = patches[0].user,
+	                                          date = patches[0].date,
+	                                          tzoffset = patches[0].tzoffset,
+	                                          description = patches[0].description)
+	                    changeset.save()
+	                    added = added + 1
 
-                        for parent in patches[0].parents:
-                            cp = ChangesetParent(changeset = changeset, parenthex = parent)
-                            cp.save()
+	                    for parent in patches[0].parents:
+	                        cp = ChangesetParent(changeset = changeset, parenthex = parent)
+	                        cp.save()
 
-                        for file in allfiles:
-                            changetypes = [p.files.get(file, None) for p in patches]
-                            changetype = reduce(merge_changes, changetypes)
+	                    for file in allfiles:
+	                        changetypes = [p.files.get(file, None) for p in patches]
+	                        changetype = reduce(merge_changes, changetypes)
 
-                            if changetype is None:
-                                continue
+	                        if changetype is None:
+	                            continue
 
-                            path = get_path(repository, file)
-                            change = Change(id = Change.next_id(), changeset = changeset, path = path, type = changetype)
-                            changes.append(change)
+	                        path = get_path(repository, file)
+	                        change = Change(id = Change.next_id(), changeset = changeset, path = path, type = changetype)
+	                        changes.append(change)
 
-                    pc = PushChangeset(push = push, changeset = changeset, index = index)
-                    pc.save()
-                    index = index + 1
+	                pc = PushChangeset(push = push, changeset = changeset, index = index)
+	                pc.save()
+	                index = index + 1
 
-                    complete = complete + 1
-                    ui.progress("indexing changesets", complete, changeset_count)
+	                complete = complete + 1
+	                ui.progress("indexing changesets", complete, changeset_count)
 
-                except:
-                    ui.warn("failed indexing changeset %s\n" % cset)
-                    raise
+	            except:
+	                ui.warn("failed indexing changeset %s\n" % cset)
+	                raise
 
-            Change.objects.bulk_create(changes)
-            transaction.commit()
+	        Change.objects.bulk_create(changes)
+	        transaction.commit()
     except:
         ui.traceback()
         transaction.rollback()
